@@ -83,6 +83,17 @@ else:
 
 expert_distribution_recorder = ExpertDistributionRecorder()
 
+dir_name: Optional[str] = None
+last_layer_id: Optional[int] = None
+token_to_activated_expert: Dict[int, torch.Tensor] = {}
+
+def init():
+    global dir_name
+    import datetime
+    date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    dir_name = f"logs/{date_time}"
+    os.makedirs(dir_name, exist_ok=False)
+
 
 class DeepseekV2MLP(nn.Module):
     def __init__(
@@ -258,6 +269,8 @@ class DeepseekV2MoE(nn.Module):
             shared_output = self.shared_experts(hidden_states)
         # router_logits: (num_tokens, n_experts)
         router_logits = self.gate(hidden_states)
+        global token_to_activated_expert
+        token_to_activated_expert[last_layer_id] = router_logits
         final_hidden_states = (
             self.experts(hidden_states=hidden_states, router_logits=router_logits)
             * self.routed_scaling_factor
@@ -1165,13 +1178,14 @@ class DeepseekV2Model(nn.Module):
         for i in range(len(self.layers)):
             expert_distribution_recorder.set_current_layer(i)
             layer = self.layers[i]
+            global last_layer_id
+            last_layer_id = i
             hidden_states, residual = layer(
                 positions, hidden_states, forward_batch, residual
             )
         if not forward_batch.forward_mode.is_idle():
             hidden_states, _ = self.norm(hidden_states, residual)
         return hidden_states
-
 
 class DeepseekV2ForCausalLM(nn.Module):
 
@@ -1204,8 +1218,21 @@ class DeepseekV2ForCausalLM(nn.Module):
         forward_batch: ForwardBatch,
         input_embeds: torch.Tensor = None,
     ) -> torch.Tensor:
+        global dir_name
+        if dir_name is None:
+            init()
+        for i in range(1000):
+            # See if the data exists
+            if not os.path.exists(f"{dir_name}/input_{i}.pt"):
+                log_file = f"{dir_name}/input_{i}.pt"
+                torch.save(torch.tensor([]), log_file)
+                break
 
         hidden_states = self.model(input_ids, positions, forward_batch, input_embeds)
+        global token_to_activated_expert
+        token_to_activated_expert["input_ids"] = input_ids
+        torch.save(token_to_activated_expert, log_file)
+        token_to_activated_expert = {}
 
         return self.logits_processor(
             input_ids, hidden_states, self.lm_head, forward_batch
