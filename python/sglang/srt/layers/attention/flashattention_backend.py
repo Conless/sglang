@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+from sglang.srt.utils.ubatch_utils import UBatchSlice
 import torch
 import triton
 import triton.language as tl
@@ -68,6 +69,36 @@ class FlashAttentionMetadata:
 
     # For sliding window attention topk>1 spec decoding
     swa_spec_metadata: Optional[FlashAttentionMetadata] = None
+    
+    # [jbluo]: For SchedFlow
+    def get_ubatch_metadata(self, ubatch_silce: UBatchSlice):
+        assert self.window_size == (-1, -1), "This is SchedFlow. Gemma is not yet supported."
+        assert self.encoder_cu_seqlens_k is None, "This is SchedFlow. Encoder-Decoder is not yet supported."
+        assert self.local_attn_metadata is None, "This is SchedFlow. Local Attention is not yet supported."
+        assert self.swa_spec_metadata is None, "This is SchedFlow. SWA Spec Decoding is not yet supported."
+        
+        cache_seqlens_int32 = self.cache_seqlens_int32[
+            ubatch_silce.request_slice
+        ]
+        max_seq_len_k = cache_seqlens_int32.max().item()
+        max_seq_len_q = max_seq_len_k
+        cu_seqlens_k = torch.nn.functional.pad(
+            torch.cumsum(
+                cache_seqlens_int32, dim=0, dtype=torch.int32
+            ),
+            (1, 0),
+        )
+        cu_seqlens_q = cu_seqlens_k.clone()
+        page_table = self.page_table[ubatch_silce.request_slice]
+        
+        return FlashAttentionMetadata(
+            cache_seqlens_int32=cache_seqlens_int32,
+            max_seq_len_q=max_seq_len_q,
+            max_seq_len_k=max_seq_len_k,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            page_table=page_table,
+        )
 
 
 # Copied from:
@@ -644,6 +675,9 @@ class FlashAttentionBackend(AttentionBackend):
                 metadata.page_table[:, self.strided_indices] // self.page_size
             )
 
+        self.forward_metadata = metadata
+        
+    def replace_forward_metadata(self, metadata: FlashAttentionMetadata):
         self.forward_metadata = metadata
 
     def forward_extend(

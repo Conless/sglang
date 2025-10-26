@@ -507,6 +507,11 @@ class ServerArgs:
     enable_pdmux: bool = False
     pdmux_config_path: Optional[str] = None
     sm_group_num: int = 8
+    
+    # For schedflow
+    enable_nano_batch_split: bool = False
+    min_nano_split_tokens: int = 1024
+    max_num_nano_batches: int = 2
 
     def get_attention_backends(server_args):
         prefill_attention_backend_str = (
@@ -3258,6 +3263,26 @@ class ServerArgs:
             default=ServerArgs.sm_group_num,
             help="Number of sm partition groups.",
         )
+        
+        # For schedflow
+        parser.add_argument(
+            "--enable-nano-batch-split",
+            action="store_true",
+            help="Enable nano batch split within a micro batch for schedflow.",
+        )
+        parser.add_argument(
+            "--min-nano-split-tokens",
+            type=int,
+            default=ServerArgs.min_nano_split_tokens,
+            help="Minimum number of tokens to split the input batch",
+        )
+        parser.add_argument(
+            "--max-num-nano-batches",
+            type=int,
+            default=ServerArgs.max_num_nano_batches,
+            help="Maximum number of nano-batches to split the input batch into",
+        )
+            
 
         # For deterministic inference
         parser.add_argument(

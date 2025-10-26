@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 
@@ -18,6 +18,10 @@ class AttentionBackend(ABC):
     @abstractmethod
     def init_forward_metadata(self, forward_batch: ForwardBatch):
         """Init the metadata for a forward pass."""
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def replace_forward_metadata(self, metadata: Any):
         raise NotImplementedError()
 
     def init_cuda_graph_state(self, max_bs: int, max_num_tokens: int):

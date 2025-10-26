@@ -3,6 +3,7 @@
 
 import ast
 import dataclasses
+from gc import enable
 import logging
 import os
 import pprint
@@ -11,6 +12,9 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from typing import Any, Callable, Optional
 
+from sglang.srt.model_executor.schedflow import get_manager, get_scheduler
+
+from sglang.srt.server_args import ServerArgs
 import torch
 import torch.fx as fx
 from torch._dispatch.python import enable_python_dispatcher
@@ -20,6 +24,9 @@ from sglang.srt.compilation.compilation_counter import compilation_counter
 from sglang.srt.compilation.compiler_interface import EagerAdapter, InductorAdaptor
 from sglang.srt.compilation.cuda_piecewise_backend import CUDAPiecewiseBackend
 from sglang.srt.compilation.pass_manager import PostGradPassManager
+
+from schedflow.config import CUDAGraphConfig, InductorConfig, SchedFlowConfig
+from schedflow.example.sglang.nanoflow import NanoFlowSchedulerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -344,10 +351,12 @@ class SGLangBackend:
 
     def __init__(
         self,
+        server_args: ServerArgs,
         config: CompilationConfig,
         graph_pool: Any,
     ):
         assert graph_pool is not None
+        self.server_args = server_args
         self.graph_pool = graph_pool
 
         self.post_grad_pass_manager = PostGradPassManager()
@@ -365,6 +374,38 @@ class SGLangBackend:
         self.inductor_config["post_grad_custom_post_pass"] = self.post_grad_pass_manager
 
     def __call__(self, graph: fx.GraphModule, example_inputs) -> Callable:
+        if self.server_args.enable_nano_batch_split:
+            # schedflow forward logic
+
+            scheduler_config = NanoFlowSchedulerConfig(
+                min_nano_split_tokens=self.server_args.min_nano_split_tokens,
+                max_num_nano_batches=self.server_args.max_num_nano_batches,
+                cudagraph_capture_sizes=[],
+            )
+            scheduler = get_scheduler(scheduler_config)
+            inductor_config = InductorConfig(
+                enabled=True,
+                compile_sizes=set(
+                    []
+                )
+            )
+            cudagraph_config = CUDAGraphConfig(
+                enabled=True,
+                capture_sizes=[],
+            )
+            schedflow_config = SchedFlowConfig(
+                max_num_nano_batches=scheduler_config.max_num_nano_batches,
+                inductor_config=inductor_config,
+                cudagraph_config=cudagraph_config,
+            )
+            return get_manager(
+                graph,
+                schedflow_config,
+                scheduler,
+                example_inputs,
+            ).get_callable()
+        
+        
         base_cache_dir = os.path.expanduser(
             os.getenv("SGLANG_CACHE_DIR", "~/.cache/sglang/")
         )

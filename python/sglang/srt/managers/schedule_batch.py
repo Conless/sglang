@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import enum
 
+from sglang.srt.utils.ubatch_utils import UBatchSlices
+
 # Copyright 2023-2024 SGLang Team
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1033,6 +1035,9 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
 
     # hicache pointer for synchronizing data loading from CPU to GPU
     hicache_consumer_index: int = -1
+    
+    # For schedflow
+    ubatch_slices: Optional[UBatchSlices] = None
 
     @classmethod
     def init_new(

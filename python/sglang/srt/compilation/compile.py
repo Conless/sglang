@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
+from sglang.srt.server_args import ServerArgs
 import torch
 
 from sglang.srt.compilation.compilation_config import CompilationConfig
@@ -119,6 +120,7 @@ def _infer_dynamic_arg_dims_from_annotations(forward_fn):
 
 def install_torch_compiled(
     module: torch.nn.Module,
+    server_args: ServerArgs,
     *,
     dynamic_arg_dims: dict[str, Union[int, list[int]]] | None = None,
     backend_factory: Optional[Callable[[torch.fx.GraphModule, list], Callable]] = None,
@@ -136,7 +138,10 @@ def install_torch_compiled(
     if backend_factory is None:
         from sglang.srt.compilation.backend import SGLangBackend
 
-        backend_factory = lambda gm, ex: SGLangBackend(compile_config, graph_pool)(
+        # [jbluo]: debug
+        assert compile_config is not None, "compile_config must be provided"
+        assert graph_pool is not None, "graph_pool must be provided"
+        backend_factory = lambda gm, ex: SGLangBackend(server_args, compile_config, graph_pool)(
             gm, ex
         )
 
@@ -184,12 +189,14 @@ def install_torch_compiled(
         torch._dynamo.eval_frame.remove_from_cache(unbound_fwd.__code__)
 
         bound = types.MethodType(unbound_fwd, self)
+        
+        # [jbluo]: Here SGLangBackend's __call__ is invoked
         compiled_callable = torch.compile(
             bound, fullgraph=fullgraph, backend=backend_factory
         )
 
-        # Trigger Dynamo so bytecode hook can capture
-        compiled_callable(*args, **kwargs)
+        # # Trigger Dynamo so bytecode hook can capture
+        # compiled_callable(*args, **kwargs)
 
         state["compiled"] = True
         state["compiled_callable"] = compiled_callable
@@ -206,5 +213,7 @@ def install_torch_compiled(
             # Explicitly run the original uncompiled forward
             return unbound_fwd(self, *args, **kwargs)
 
+    # [jbluo]: model_runner.model.model.forward is replaced here
+    print(f"Installing torch.compile trampoline on {module.__class__.__name__}.forward")
     module.forward = types.MethodType(trampoline, module)
     return module

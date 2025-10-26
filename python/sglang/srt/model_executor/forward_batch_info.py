@@ -34,6 +34,10 @@ from enum import IntEnum, auto
 from functools import total_ordering
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
+import copy
+
+from sglang.srt.model_executor.schedflow import nano_ubatch_split
+
 import torch
 import triton
 import triton.language as tl
@@ -56,6 +60,8 @@ if TYPE_CHECKING:
     from sglang.srt.model_executor.model_runner import ModelRunner
     from sglang.srt.sampling.sampling_batch_info import SamplingBatchInfo
     from sglang.srt.speculative.spec_info import SpecInput, SpeculativeAlgorithm
+    from sglang.srt.utils.ubatch_utils import UBatchSlice
+    from sglang.srt.layers.attention.flashattention_backend import FlashAttentionBackend
 
 _is_npu = is_npu()
 
@@ -316,6 +322,9 @@ class ForwardBatch:
     tbo_parent_token_range: Optional[Tuple[int, int]] = None
     tbo_children: Optional[List[ForwardBatch]] = None
 
+    # For schedflow
+    ubatch_slices: Optional[List["UBatchSlice"]] = None
+
     @classmethod
     def init_new(
         cls,
@@ -453,6 +462,46 @@ class ForwardBatch:
         )
 
         return ret
+
+    def get_ubatches(self) -> List["ForwardBatch"]:
+        """For SchedFlow: Split the current ForwardBatch into multiple UBatch ForwardBatches."""
+        # [jbluo] Note: Here we only take the things that are used in FA3. All these codes are for unified attention op.
+        assert (
+            self.ubatch_slices is not None
+        ), "prepare_ubatch_slices() must be called first."
+        ubatches = [
+            ForwardBatch(
+                forward_mode=self.forward_mode,
+                batch_size=ubatch_slice.num_requests,
+                input_ids=self.input_ids[ubatch_slice.request_slice],
+                req_pool_indices=self.req_pool_indices[ubatch_slice.request_slice],
+                seq_lens=self.seq_lens[ubatch_slice.request_slice],
+                out_cache_loc=self.out_cache_loc[ubatch_slice.token_slice],
+                seq_lens_sum=ubatch_slice.num_tokens,
+                orig_seq_lens=(
+                    self.orig_seq_lens[ubatch_slice.request_slice]
+                    if self.orig_seq_lens is not None
+                    else None
+                ),
+                seq_lens_cpu=(
+                    self.seq_lens_cpu[ubatch_slice.request_slice]
+                    if self.seq_lens_cpu is not None
+                    else None
+                ),
+                positions=self.positions[ubatch_slice.token_slice],
+                token_to_kv_pool=self.token_to_kv_pool,
+                attn_backend=copy.deepcopy(self.attn_backend),
+            )
+            for ubatch_slice in self.ubatch_slices
+        ]
+
+        # [jbluo] We replace the attention metadata for each ubatch, so that the "stateful" attention op can work correctly.
+        for ubatch, ubatch_slice in zip(ubatches, self.ubatch_slices):
+            ubatch.attn_backend.replace_forward_metadata(
+                self.attn_backend.forward_metadata.get_ubatch_metadata(ubatch_slice)
+            )
+
+        return ubatches
 
     def merge_mm_inputs(self) -> Optional[MultimodalInputs]:
         """
@@ -916,6 +965,9 @@ class ForwardBatch:
     @property
     def can_run_tbo(self):
         return self.tbo_split_seq_index is not None
+
+    def prepare_ubatch_slices(self):
+        self.ubatch_slices, _ = nano_ubatch_split(self, False, False)
 
 
 def enable_num_token_non_padded(server_args):

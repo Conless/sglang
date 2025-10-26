@@ -132,6 +132,7 @@ class PiecewiseCudaGraphRunner:
     def __init__(self, model_runner: ModelRunner):
         # Parse args
         self.model_runner = model_runner
+        self.server_args = model_runner.server_args
         self.device = model_runner.device
         self.device_module = torch.get_device_module(self.device)
         self.graphs = {}
@@ -191,6 +192,7 @@ class PiecewiseCudaGraphRunner:
         ) as patched_model:
             install_torch_compiled(
                 patched_model,
+                server_args=self.server_args,
                 fullgraph=True,
                 dynamic_arg_dims=None,
                 compile_config=self.compile_config,
@@ -212,6 +214,7 @@ class PiecewiseCudaGraphRunner:
         self.raw_num_tokens = 0
 
     def warmup_and_capture(self):
+        print(f"[TP {self.model_runner.tp_rank}] PiecewiseCudaGraphRunner warmup_and_capture.")
         num_tokens = 2
         with torch.device(self.device):
             forward_batch = ForwardBatch(
@@ -249,8 +252,12 @@ class PiecewiseCudaGraphRunner:
                 global_forward_mode=ForwardMode.EXTEND,
                 lora_ids=None,
             )
+        forward_batch.prepare_ubatch_slices()
+        import sys
+        sys.stdout.flush()
 
-        with set_forward_context(forward_batch, self.attention_layers):
+        with set_forward_context(forward_batch, self.attention_layers, forward_batch.ubatch_slices):
+            print(f"[TP {self.model_runner.tp_rank}] PiecewiseCudaGraphRunner warmup_and_capture. prepared ubatch slices: {forward_batch.ubatch_slices}, going to model.forward")
             _ = self.model_runner.model.forward(
                 forward_batch.input_ids,
                 forward_batch.positions,
@@ -366,6 +373,8 @@ class PiecewiseCudaGraphRunner:
                 lora_ids=None,
             )
             self.tbo_plugin.capture_one_batch_size(forward_batch, num_tokens=num_tokens)
+            
+
 
         if lora_ids is not None:
             self.model_runner.lora_manager.prepare_lora_batch(forward_batch)
@@ -381,9 +390,11 @@ class PiecewiseCudaGraphRunner:
             # FIXME: the implementation is hacky. `is_extend_in_batch`` is for determining the deepep mode.
             # It is True in this context but we need to set it to use low latency deepep mode.
             set_is_extend_in_batch(False)
+            
+            forward_batch.prepare_ubatch_slices()
 
             kwargs = {}
-            with set_forward_context(forward_batch, self.attention_layers):
+            with set_forward_context(forward_batch, self.attention_layers, forward_batch.ubatch_slices):
                 self.model_runner.model.forward(
                     forward_batch.input_ids,
                     forward_batch.positions,
@@ -475,8 +486,9 @@ class PiecewiseCudaGraphRunner:
         **kwargs,
     ) -> Union[LogitsProcessorOutput, PPProxyTensors]:
         static_forward_batch = self.replay_prepare(forward_batch, **kwargs)
+        static_forward_batch.prepare_ubatch_slices()
         # Replay
-        with set_forward_context(static_forward_batch, self.attention_layers):
+        with set_forward_context(static_forward_batch, self.attention_layers, static_forward_batch.ubatch_slices):
             with set_compiled(True):
                 output = self.model_runner.model.forward(
                     static_forward_batch.input_ids,

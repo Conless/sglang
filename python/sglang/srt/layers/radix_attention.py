@@ -139,6 +139,7 @@ def unified_attention_with_output(
     forward_batch = context.forward_batch
     attention_layers = context.attention_layers
     attention_layer = attention_layers[layer_id]
+    # print(f"key shape: {key.shape} value shape: {value.shape} output shape: {output.shape}")
     ret = forward_batch.attn_backend.forward(
         query, key, value, attention_layer, forward_batch, save_kv_cache
     )
