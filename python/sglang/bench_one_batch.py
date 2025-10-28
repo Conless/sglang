@@ -269,7 +269,7 @@ def prepare_synthetic_inputs_for_latency_test(
 
 
 @torch.no_grad
-def extend(reqs, model_runner):
+def extend(reqs, model_runner: ModelRunner):
     # Create dummy tree_cache for benchmarks (no prefix caching, just allocation)
     dummy_tree_cache = SimpleNamespace(
         page_size=model_runner.server_args.page_size,
@@ -296,7 +296,9 @@ def extend(reqs, model_runner):
 
 
 @torch.no_grad
-def decode(input_token_ids, batch, model_runner):
+def decode(input_token_ids, batch: ScheduleBatch, model_runner: ModelRunner):
+    print(f"decode {input_token_ids.shape=}")
+    assert input_token_ids.shape[0] == batch.batch_size(), f"{input_token_ids.shape=}, {batch.batch_size()=}"
     batch.output_ids = input_token_ids
     batch.prepare_for_decode()
     _maybe_prepare_mlp_sync_batch(batch, model_runner)

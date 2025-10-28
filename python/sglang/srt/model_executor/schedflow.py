@@ -59,11 +59,16 @@ def nano_ubatch_split(
     """
 
     batch_size = batch.batch_size
-    seq_lens = batch.seq_lens.tolist()
-    # print(f"Preparing nano-batch split for {batch_size=}, {seq_lens=}, {is_dummy_run=}, {use_cudagraph=}")
+    if batch.forward_mode.is_extend():
+        num_tokens = batch.extend_seq_lens.tolist()
+    elif batch.forward_mode.is_decode():
+        num_tokens = [1] * batch_size
+    else:
+        raise ValueError(f"SchedFlow: unsupported forward mode: {batch.forward_mode}")
+    print(f"Preparing nano-batch split for {batch.input_ids.shape=} {batch_size=}, {num_tokens=}, {is_dummy_run=}, {use_cudagraph=}")
     split_config = _manager.prepare(
         batch_size,
-        seq_lens,
+        num_tokens=num_tokens,
         is_dryrun=is_dummy_run,
         use_cudagraph=use_cudagraph,
     )

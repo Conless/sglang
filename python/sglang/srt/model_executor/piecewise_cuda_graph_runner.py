@@ -414,22 +414,30 @@ class PiecewiseCudaGraphRunner:
         self,
         forward_batch: ForwardBatch,
         **kwargs,
-    ):
+    ):      
         num_tokens = len(forward_batch.input_ids)
-        index = bisect.bisect_left(self.capture_num_tokens, num_tokens)
-        static_num_tokens = self.capture_num_tokens[index]
         self.raw_num_tokens = num_tokens
-        if static_num_tokens != num_tokens:
-            self.out_cache_loc.zero_()
+        
+        # CUDA graph inputs prepare logic
+        
+        if self.server_args.enable_nano_batch_split:
+            # copy inputs directly
+            input_ids = forward_batch.input_ids.clone()
+            positions = forward_batch.positions.clone()
+            out_cache_loc = forward_batch.out_cache_loc.clone()
+        else:
+            index = bisect.bisect_left(self.capture_num_tokens, num_tokens)
+            static_num_tokens = self.capture_num_tokens[index]
+            if static_num_tokens != num_tokens:
+                self.out_cache_loc.zero_()
+            self.input_ids[:num_tokens].copy_(forward_batch.input_ids)
+            self.positions[:num_tokens].copy_(forward_batch.positions)
+            self.out_cache_loc[:num_tokens].copy_(forward_batch.out_cache_loc)
+            input_ids = self.input_ids[:static_num_tokens]
+            positions = self.positions[:static_num_tokens]
+            out_cache_loc = self.out_cache_loc[:static_num_tokens]
+
         bs = forward_batch.batch_size
-
-        self.input_ids[:num_tokens].copy_(forward_batch.input_ids)
-        self.positions[:num_tokens].copy_(forward_batch.positions)
-        self.out_cache_loc[:num_tokens].copy_(forward_batch.out_cache_loc)
-
-        input_ids = self.input_ids[:static_num_tokens]
-        positions = self.positions[:static_num_tokens]
-        out_cache_loc = self.out_cache_loc[:static_num_tokens]
 
         next_token_logits_buffer = None
         mrope_positions = None
@@ -477,6 +485,8 @@ class PiecewiseCudaGraphRunner:
             top_p_normalized_logprobs=forward_batch.top_p_normalized_logprobs,
             top_p=forward_batch.top_p,
         )
+        
+        static_forward_batch.prepare_ubatch_slices()
 
         return static_forward_batch
 
@@ -486,7 +496,6 @@ class PiecewiseCudaGraphRunner:
         **kwargs,
     ) -> Union[LogitsProcessorOutput, PPProxyTensors]:
         static_forward_batch = self.replay_prepare(forward_batch, **kwargs)
-        static_forward_batch.prepare_ubatch_slices()
         # Replay
         with set_forward_context(static_forward_batch, self.attention_layers, static_forward_batch.ubatch_slices):
             with set_compiled(True):

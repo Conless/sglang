@@ -346,6 +346,8 @@ class TpModelWorker(BaseTpWorker):
             self.set_hicache_consumer(model_worker_batch.hicache_consumer_index)
 
             forward_batch = ForwardBatch.init_new(model_worker_batch, self.model_runner)
+            
+            print(f"TpModelWorker forward_batch_generation, {forward_batch.input_ids.shape=} batch_size={forward_batch.batch_size}, seq_lens={forward_batch.seq_lens}, device={forward_batch.input_ids.device}")
         else:
             # FIXME(lsyin): unify the interface of forward_batch
             assert forward_batch is not None

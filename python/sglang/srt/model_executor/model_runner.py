@@ -2147,10 +2147,6 @@ class ModelRunner:
         if not self.is_generation:
             kwargs["get_embedding"] = True
 
-        if self.piecewise_cuda_graph_runner is not None:
-            if self.piecewise_cuda_graph_runner.can_run(forward_batch):
-                return self.piecewise_cuda_graph_runner.replay(forward_batch, **kwargs)
-
         return self.model.forward(
             forward_batch.input_ids,
             forward_batch.positions,
@@ -2170,7 +2166,29 @@ class ModelRunner:
             forward_batch,
             **kwargs,
         )
-
+        
+    def forward_schedflow(
+        self, forward_batch: ForwardBatch, skip_attn_backend_init: bool = False, pp_proxy_tensors=None,
+    ) -> LogitsProcessorOutput:
+        if not skip_attn_backend_init:
+            self.attn_backend.init_forward_metadata(forward_batch)
+            
+        kwargs = {}        
+        if forward_batch.forward_mode.is_extend():
+            if self.support_pp:
+                kwargs["pp_proxy_tensors"] = pp_proxy_tensors
+            if forward_batch.input_embeds is not None:
+                kwargs["input_embeds"] = forward_batch.input_embeds.bfloat16()
+            if not self.is_generation:
+                kwargs["get_embedding"] = True
+        elif forward_batch.forward_mode.is_decode() or forward_batch.forward_mode.is_idle():
+            if self.support_pp:
+                kwargs["pp_proxy_tensors"] = pp_proxy_tensors
+            
+        assert self.piecewise_cuda_graph_runner is not None
+        # [SchedFlow] In schedflow, we always use piecewise cuda graph
+        return self.piecewise_cuda_graph_runner.replay(forward_batch, **kwargs)    
+        
     def forward_split_prefill(
         self,
         forward_batch: ForwardBatch,
@@ -2227,6 +2245,13 @@ class ModelRunner:
         reinit_attn_backend: bool = False,
         split_forward_count: int = 1,
     ) -> Tuple[Union[LogitsProcessorOutput, PPProxyTensors], bool]:
+        if self.server_args.enable_nano_batch_split:
+            return self.forward_schedflow(
+                forward_batch,
+                skip_attn_backend_init=skip_attn_backend_init,
+                pp_proxy_tensors=pp_proxy_tensors,
+            ), False
+        
         mode_check = (
             forward_batch.forward_mode.is_cpu_graph
             if self.device == "cpu"
