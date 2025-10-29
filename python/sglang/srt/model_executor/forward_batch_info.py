@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum, auto
 from functools import total_ordering
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import copy
 
@@ -463,7 +463,7 @@ class ForwardBatch:
 
         return ret
 
-    def get_ubatches(self) -> List["ForwardBatch"]:
+    def get_ubatches_and_metadatas(self) -> Tuple[List["ForwardBatch"], List[Any]]:
         """For SchedFlow: Split the current ForwardBatch into multiple UBatch ForwardBatches."""
         # [jbluo] Note: Here we only take the things that are used in FA3. All these codes are for unified attention op.
         assert (
@@ -473,35 +473,34 @@ class ForwardBatch:
             ForwardBatch(
                 forward_mode=self.forward_mode,
                 batch_size=ubatch_slice.num_requests,
-                input_ids=self.input_ids[ubatch_slice.request_slice],
-                req_pool_indices=self.req_pool_indices[ubatch_slice.request_slice],
-                seq_lens=self.seq_lens[ubatch_slice.request_slice],
-                out_cache_loc=self.out_cache_loc[ubatch_slice.token_slice],
+                input_ids=self.input_ids[ubatch_slice.request_slice].clone(),
+                req_pool_indices=self.req_pool_indices[ubatch_slice.request_slice].clone(),
+                seq_lens=self.seq_lens[ubatch_slice.request_slice].clone(),
+                out_cache_loc=self.out_cache_loc[ubatch_slice.token_slice].clone(),
                 seq_lens_sum=ubatch_slice.num_tokens,
                 orig_seq_lens=(
-                    self.orig_seq_lens[ubatch_slice.request_slice]
+                    self.orig_seq_lens[ubatch_slice.request_slice].clone()
                     if self.orig_seq_lens is not None
                     else None
                 ),
                 seq_lens_cpu=(
-                    self.seq_lens_cpu[ubatch_slice.request_slice]
+                    self.seq_lens_cpu[ubatch_slice.request_slice].clone()
                     if self.seq_lens_cpu is not None
                     else None
                 ),
-                positions=self.positions[ubatch_slice.token_slice],
+                positions=self.positions[ubatch_slice.token_slice].clone(),
                 token_to_kv_pool=self.token_to_kv_pool,
-                attn_backend=copy.deepcopy(self.attn_backend),
+                attn_backend=self.attn_backend, # ubatches use same attn_backend
             )
             for ubatch_slice in self.ubatch_slices
         ]
+        
+        metadatas = [
+            self.attn_backend.forward_metadata.get_ubatch_metadata(ubatch_slice)
+            for ubatch_slice in self.ubatch_slices
+        ]
 
-        # [jbluo] We replace the attention metadata for each ubatch, so that the "stateful" attention op can work correctly.
-        for ubatch, ubatch_slice in zip(ubatches, self.ubatch_slices):
-            ubatch.attn_backend.replace_forward_metadata(
-                self.attn_backend.forward_metadata.get_ubatch_metadata(ubatch_slice)
-            )
-
-        return ubatches
+        return ubatches, metadatas
 
     def merge_mm_inputs(self) -> Optional[MultimodalInputs]:
         """

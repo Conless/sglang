@@ -253,11 +253,14 @@ class PiecewiseCudaGraphRunner:
                 lora_ids=None,
             )
         forward_batch.prepare_ubatch_slices()
-        import sys
-        sys.stdout.flush()
+        
+        self.model_runner.attn_backend.init_forward_metadata(forward_batch)
 
         with set_forward_context(forward_batch, self.attention_layers, forward_batch.ubatch_slices):
             print(f"[TP {self.model_runner.tp_rank}] PiecewiseCudaGraphRunner warmup_and_capture. prepared ubatch slices: {forward_batch.ubatch_slices}, going to model.forward")
+            import sys
+            sys.stdout.flush()
+
             _ = self.model_runner.model.forward(
                 forward_batch.input_ids,
                 forward_batch.positions,

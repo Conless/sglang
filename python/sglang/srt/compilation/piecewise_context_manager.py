@@ -16,22 +16,25 @@ class ForwardContext:
         self,
         forward_batch: Optional["ForwardBatch"] = None,
         attention_layers: Optional[List[Any]] = None,
+        metadata: Optional[Any] = None,
         ubatch_slices: Optional[UBatchSlices] = None,
     ):
         self.forward_batch = forward_batch
         self.attention_layers = attention_layers
+        self.metadata = metadata
         self.ubatch_slices = ubatch_slices
         self.ubatch_contexts: Optional[List["ForwardContext"]] = None
         
         if self.ubatch_slices is not None:
             # print(f"ForwardContext initialized with {len(self.ubatch_slices)} ubatch slices.") 
-            ubatches = forward_batch.get_ubatches()
+            ubatches, metadatas = forward_batch.get_ubatches_and_metadatas()
             self.ubatch_contexts = [
                 ForwardContext(
                     forward_batch=ubatch,
                     attention_layers=attention_layers,
+                    metadata=metadata,
                     ubatch_slices=None,
-                ) for ubatch in ubatches
+                ) for ubatch, metadata in zip(ubatches, metadatas)
             ]
             
 
@@ -57,7 +60,8 @@ def get_forward_context() -> Optional[ForwardContext]:
 def replace_forward_context(new_context: ForwardContext):
     global _forward_context
     _forward_context = new_context
-    # print(f"Forward context replaced. batch size: {new_context.forward_batch.batch_size}")
+    _forward_context.forward_batch.attn_backend.replace_forward_metadata(new_context.metadata)
+    # print(f"Forward context replaced. batch size: {new_context.forward_batch.batch_size} metadata: {new_context.forward_batch.attn_backend}")
 
 
 @contextmanager
@@ -68,7 +72,11 @@ def set_forward_context(
 ):
     global _forward_context
     prev_forward_context = _forward_context
-    _forward_context = ForwardContext(forward_batch, attention_layers, ubatch_slices)
+    _forward_context = ForwardContext(
+        forward_batch=forward_batch, 
+        attention_layers=attention_layers, 
+        ubatch_slices=ubatch_slices,
+    )
     
     print(f"set_forward_context: {forward_batch.batch_size=}, {len(attention_layers)=}, {ubatch_slices=}")
     try:

@@ -109,7 +109,7 @@ class RadixAttention(nn.Module):
             else:
                 k = k.view(-1, self.tp_k_head_num, self.v_head_dim)
 
-        if forward_batch.forward_mode.is_extend() and get_forward_context() is not None:
+        if forward_batch.forward_mode.is_extend() or get_forward_context() is not None:
             output = torch.empty_like(q)
             torch.ops.sglang.unified_attention_with_output(
                 q, k, v, output, save_kv_cache, self.layer_id

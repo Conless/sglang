@@ -7,6 +7,7 @@ import torch
 import triton
 import triton.language as tl
 
+from sglang.srt.utils.ubatch_utils import UBatchSlice
 from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
 from sglang.srt.layers.attention.utils import create_flashinfer_kv_indices_triton
 from sglang.srt.layers.dp_attention import get_attention_tp_size
@@ -50,6 +51,53 @@ class ForwardMetadata:
     window_kv_indices: torch.Tensor
     window_num_kv_splits: torch.Tensor
     window_kv_offsets: torch.Tensor
+    
+    # [jbluo]: For SchedFlow    
+    def get_ubatch_metadata(self, ubatch_slice: UBatchSlice) -> ForwardMetadata:
+        assert self.custom_mask is None, "Not supported yet"
+        assert self.mask_indptr is None, "Not supported yet"
+        assert self.window_kv_indptr is None, "Not supported yet"
+        assert self.window_kv_indices is None, "Not supported yet"
+        assert self.window_num_kv_splits is None, "Not supported yet"
+        assert self.window_kv_offsets is None, "Not supported yet"
+        
+        attn_logits = self.attn_logits[ubatch_slice.request_slice].clone() if self.attn_logits is not None else None
+        attn_lse = self.attn_lse[ubatch_slice.request_slice].clone() if self.attn_lse is not None else None
+        max_extend_len = self.max_extend_len
+        num_kv_splits = self.num_kv_splits[ubatch_slice.request_slice].clone() if self.num_kv_splits is not None else None
+        kv_indptr = torch.nn.functional.pad(
+            self.kv_indptr[1:][ubatch_slice.request_slice] - self.kv_indptr[ubatch_slice.request_slice.start],
+            (1, 0),
+        )
+        kv_indices = self.kv_indices[ubatch_slice.token_slice].clone()
+        qo_indptr = torch.nn.functional.pad(
+            self.qo_indptr[1:][ubatch_slice.request_slice] - self.qo_indptr[ubatch_slice.request_slice.start],
+            (1, 0),
+        ) if self.qo_indptr is not None else None
+        
+        print(f"get_ubatch_metadata {ubatch_slice=} {kv_indptr=} {qo_indptr=}")
+        
+        custom_mask = None
+        mask_indptr = None
+        window_kv_indptr = None
+        window_kv_indices = None
+        window_num_kv_splits = None
+        window_kv_offsets = None
+        return ForwardMetadata(
+            attn_logits,
+            attn_lse,
+            max_extend_len,
+            num_kv_splits,
+            kv_indptr,
+            kv_indices,
+            qo_indptr,
+            custom_mask,
+            mask_indptr,
+            window_kv_indptr,
+            window_kv_indices,
+            window_num_kv_splits,
+            window_kv_offsets,
+        )
 
 
 class TritonAttnBackend(AttentionBackend):
@@ -170,6 +218,9 @@ class TritonAttnBackend(AttentionBackend):
         self.forward_metadata: ForwardMetadata = None
 
         self.cuda_graph_custom_mask = None
+        
+    def replace_forward_metadata(self, metadata: ForwardMetadata):
+        self.forward_metadata = metadata
 
     def get_num_kv_splits(
         self,
@@ -832,6 +883,7 @@ class TritonAttnBackend(AttentionBackend):
             kv_indices = self.forward_metadata.kv_indices
             window_kv_offsets = None
 
+        # print(f"TritonAttnBackend. forward_extend. {self.forward_metadata=}")
         self.extend_attention_fwd(
             q.view(-1, layer.tp_q_head_num, layer.qk_head_dim),
             k.contiguous(),
