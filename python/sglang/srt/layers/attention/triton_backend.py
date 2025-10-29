@@ -69,14 +69,17 @@ class ForwardMetadata:
             self.kv_indptr[1:][ubatch_slice.request_slice] - self.kv_indptr[ubatch_slice.request_slice.start],
             (1, 0),
         )
-        kv_indices = self.kv_indices[ubatch_slice.token_slice].clone()
+        
+        kv_indices = self.kv_indices[
+            self.kv_indptr[ubatch_slice.request_slice.start] : self.kv_indptr[ubatch_slice.request_slice.stop]
+        ].clone()
         qo_indptr = torch.nn.functional.pad(
             self.qo_indptr[1:][ubatch_slice.request_slice] - self.qo_indptr[ubatch_slice.request_slice.start],
             (1, 0),
         ) if self.qo_indptr is not None else None
-        
-        print(f"get_ubatch_metadata {ubatch_slice=} {kv_indptr=} {qo_indptr=}")
-        
+
+        print(f"get_ubatch_metadata {ubatch_slice=} {max_extend_len=} {num_kv_splits=} {self.kv_indptr[1:][ubatch_slice.request_slice]=} {kv_indptr=} {kv_indices=} {qo_indptr=}")
+
         custom_mask = None
         mask_indptr = None
         window_kv_indptr = None
