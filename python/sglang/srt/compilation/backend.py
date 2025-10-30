@@ -384,17 +384,18 @@ class SGLangBackend:
             )
             scheduler = get_scheduler(scheduler_config)
             inductor_config = InductorConfig(
-                enabled=True,
+                enabled=False,
                 compile_sizes=set(
                     []
                 )
             )
             cudagraph_config = CUDAGraphConfig(
-                enabled=True,
+                enabled=False,
                 capture_sizes=[],
             )
             schedflow_config = SchedFlowConfig(
                 max_num_nano_batches=scheduler_config.max_num_nano_batches,
+                min_nano_split_tokens=scheduler_config.min_nano_split_tokens,
                 inductor_config=inductor_config,
                 cudagraph_config=cudagraph_config,
             )

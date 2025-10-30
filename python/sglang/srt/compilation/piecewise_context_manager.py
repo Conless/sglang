@@ -78,7 +78,7 @@ def set_forward_context(
         ubatch_slices=ubatch_slices,
     )
     
-    print(f"set_forward_context: {forward_batch.batch_size=}, {len(attention_layers)=}, {ubatch_slices=}")
+    # print(f"set_forward_context: {forward_batch.batch_size=}, {len(attention_layers)=}, {ubatch_slices=}")
     try:
         yield
     finally:

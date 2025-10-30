@@ -78,7 +78,7 @@ class ForwardMetadata:
             (1, 0),
         ) if self.qo_indptr is not None else None
 
-        print(f"get_ubatch_metadata {ubatch_slice=} {max_extend_len=} {num_kv_splits=} {self.kv_indptr[1:][ubatch_slice.request_slice]=} {kv_indptr=} {kv_indices=} {qo_indptr=}")
+        # print(f"get_ubatch_metadata {ubatch_slice=} {max_extend_len=} {num_kv_splits=} {self.kv_indptr[1:][ubatch_slice.request_slice]=} {kv_indptr=} {kv_indices=} {qo_indptr=}")
 
         custom_mask = None
         mask_indptr = None

@@ -169,7 +169,11 @@ class PiecewiseCudaGraphRunner:
             self.capture_hidden_mode = CaptureHiddenMode.FULL
 
         # Attention backend
-        self.max_num_tokens = max(self.capture_num_tokens)
+        self.max_num_tokens = (
+            self.server_args.max_prefill_tokens
+            if self.server_args.enable_nano_batch_split
+            else max(self.capture_num_tokens)
+        )
 
         # Graph inputs
         with torch.device(self.device):
@@ -420,25 +424,21 @@ class PiecewiseCudaGraphRunner:
     ):      
         num_tokens = len(forward_batch.input_ids)
         self.raw_num_tokens = num_tokens
-        
-        # CUDA graph inputs prepare logic
-        
+
         if self.server_args.enable_nano_batch_split:
-            # copy inputs directly
-            input_ids = forward_batch.input_ids.clone()
-            positions = forward_batch.positions.clone()
-            out_cache_loc = forward_batch.out_cache_loc.clone()
+            static_num_tokens = max(num_tokens, 2)
         else:
+            # CUDA graph inputs prepare logic
             index = bisect.bisect_left(self.capture_num_tokens, num_tokens)
             static_num_tokens = self.capture_num_tokens[index]
-            if static_num_tokens != num_tokens:
-                self.out_cache_loc.zero_()
-            self.input_ids[:num_tokens].copy_(forward_batch.input_ids)
-            self.positions[:num_tokens].copy_(forward_batch.positions)
-            self.out_cache_loc[:num_tokens].copy_(forward_batch.out_cache_loc)
-            input_ids = self.input_ids[:static_num_tokens]
-            positions = self.positions[:static_num_tokens]
-            out_cache_loc = self.out_cache_loc[:static_num_tokens]
+        if static_num_tokens != num_tokens:
+            self.out_cache_loc.zero_()
+        self.input_ids[:num_tokens].copy_(forward_batch.input_ids)
+        self.positions[:num_tokens].copy_(forward_batch.positions)
+        self.out_cache_loc[:num_tokens].copy_(forward_batch.out_cache_loc)
+        input_ids = self.input_ids[:static_num_tokens]
+        positions = self.positions[:static_num_tokens]
+        out_cache_loc = self.out_cache_loc[:static_num_tokens]
 
         bs = forward_batch.batch_size
 
