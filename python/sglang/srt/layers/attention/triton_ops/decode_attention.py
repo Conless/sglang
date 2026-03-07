@@ -733,6 +733,9 @@ def decode_attention_fwd(
     xai_temperature_len=-1,
 ):
     assert max_kv_splits == attn_logits.shape[2]
+    if q.shape[0] > kv_indptr.shape[0] - 1:
+        q = q[:kv_indptr.shape[0] - 1]
+        o = o[:kv_indptr.shape[0] - 1]
     assert q.shape[0] <= kv_indptr.shape[0] - 1
     assert q.shape[0] <= attn_logits.shape[0]
 

@@ -766,8 +766,12 @@ class MHATokenToKVPool(KVCache):
                 self.v_buffer[layer_id - self.start_layer][loc] = cache_v
             current_stream.wait_stream(self.alt_stream)
         else:
-            self.k_buffer[layer_id - self.start_layer][loc] = cache_k
-            self.v_buffer[layer_id - self.start_layer][loc] = cache_v
+            if loc.shape[0] != cache_k.shape[0]:
+                self.k_buffer[layer_id - self.start_layer][loc] = cache_k[:loc.shape[0]]
+                self.v_buffer[layer_id - self.start_layer][loc] = cache_v[:loc.shape[0]]
+            else:
+                self.k_buffer[layer_id - self.start_layer][loc] = cache_k
+                self.v_buffer[layer_id - self.start_layer][loc] = cache_v
 
     def move_kv_cache(self, tgt_loc: torch.Tensor, src_loc: torch.Tensor):
         N = tgt_loc.numel()

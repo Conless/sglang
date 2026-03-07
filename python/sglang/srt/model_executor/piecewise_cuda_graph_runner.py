@@ -426,6 +426,8 @@ class PiecewiseCudaGraphRunner:
         self.raw_num_tokens = num_tokens
 
         if self.server_args.enable_nano_batch_split:
+            # The minimum number of tokens to avoid recompilation
+            # https://docs.pytorch.org/docs/stable/user_guide/torch_compiler/torch.compiler_dynamo_deepdive.html#are-always-specialized
             static_num_tokens = max(num_tokens, 2)
         else:
             # CUDA graph inputs prepare logic
